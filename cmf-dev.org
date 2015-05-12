@@ -1,0 +1,863 @@
+#+TITLE: CMF developer notes
+#+AUTHOR: Jose San Leandro
+#+LANGUAGE: en
+#+LATEX_HEADER: \usepackage[english]{babel}
+#+LATEX: \maketitle
+
+* Introduction
+
+This document describes the process of working with
+CMF, including building an Apache module,
+based on the [[https://httpd.apache.org/docs/2.4/developer/modguide.html][Apache guide]].
+
+We'll use a custom Docker image,
+with an Apache instance,
+and sharing our module
+through host volumes.
+
+** Setting up Docker
+
+We'll extend our =base= image as usual,
+and start with a simple /Dockerfile.template/:
+
+#+BEGIN_SRC
+FROM ${NAMESPACE}/base:${TAG}
+MAINTAINER ${MAINTAINER}
+
+RUN \
+  DEBIAN_FRONTEND=noninteractive \
+  apt-get install -y apache
+
+VOLUME /var/www
+
+EXPOSE 80
+#+END_SRC
+
+Building it is simple as well:
+
+#+BEGIN_SRC
+./build.sh apache
+#+END_SRC
+
+Simple and wrong :)
+
+#+BEGIN_SRC
+Package apache is not available, but is referred to by another package.
+This may mean that the package is missing, has been obsoleted, or
+is only available from another source
+
+E: Package 'apache' has no installation candidate
+#+END_SRC
+
+We don't remember the name of the package
+for Apache in Ubuntu,
+so the best approach
+is to run /base/ image
+and find out by ourselves.
+
+#+BEGIN_SRC
+> docker run -d acmsl/base
+[container-id]
+> docker exec -it [container-id] /bin/bash
+root@[container-id]:/# apt-cache search apache
+[..]
+apache2 - Apache HTTP Server
+[..]
+apache2-dev - Apache HTTP Server (development headers)
+[..]
+apache2-utils - Apache HTTP Server (utility programs for web servers)
+[..]
+#+END_SRC
+
+Let's change our Dockerfile template accordingly:
+
+#+BEGIN_SRC
+[..]
+RUN \
+  DEBIAN_FRONTEND=noninteractive \
+  apt-get install -y apache2 apache2-dev apache2-utils
+[..]
+#+END_SRC
+
+And try again. Now it succeeds.
+Our purpose is to find out
+where to place
+the files after compiling our module,
+and make sure Apache finds them.
+
+Let's run our new image
+to find out.
+
+#+BEGIN_SRC
+> docker run -d acmsl/apache
+[container-id]
+> docker exec -it [container-id] /bin/bash
+root@[container-id]:/# cd /etc/apache2
+root@[container-id]:/etc/apache2# less apache2.conf
+[..]
+# It is split into several files forming the configuration hierarchy outlined
+# below, all located in the /etc/apache2/ directory:
+#
+#       /etc/apache2/
+#       |-- apache2.conf
+#       |       `--  ports.conf
+#       |-- mods-enabled
+#       |       |-- *.load
+#       |       `-- *.conf
+#       |-- conf-enabled
+#       |       `-- *.conf
+#       `-- sites-enabled
+#               `-- *.conf
+[..]
+root@[container-id]:/etc/apache2# cat /etc/apache2/mods-enabled/autoindex.load
+LoadModule autoindex_module /usr/lib/apache2/modules/mod_autoindex.so
+#+END_SRC
+
+After reviewing the folder structure,
+Apache should be able to find our module,
+provided we create a proper symbolic link
+to our files,
+in a host volume.
+
+Let's try it out. Our Dockerfile template now reads:
+
+#+BEGIN_SRC
+FROM ${NAMESPACE}/base:${TAG}
+MAINTAINER ${MAINTAINER}
+
+RUN \
+  DEBIAN_FRONTEND=noninteractive \
+  apt-get install -y apache2 apache2-dev apache2-utils && \
+  mkdir /usr/local/lib/apache2 && \
+  cd /etc/apache2/mods-available && \
+  ln -s /usr/local/lib/apache2/learn.conf learn.conf && \
+  echo "LoadModule learn_module /usr/local/lib/apache2/mod_learn.so" > learn.load && \
+  a2enmod learn
+
+VOLUME ["/var/www", "/usr/local/lib/apache2"]
+
+EXPOSE 80
+#+END_SRC
+
+So far so good.
+However, we're using Phusion-baseimage,
+so we must provide a =rc.local= file
+that will be responsible of running
+our Apache instance.
+
+It's really as simple as it seems (in a file =rc.local= in /apache/ folder).
+
+#+BEGIN_SRC
+#!/bin/bash
+
+service apache2 start
+#+END_SRC
+
+Finally, our Dockerfile gets
+
+#+BEGIN_SRC
+FROM ${NAMESPACE}/base:${TAG}
+MAINTAINER ${MAINTAINER}
+
+COPY rc.local /etc/rc.local
+
+RUN \
+  DEBIAN_FRONTEND=noninteractive \
+  apt-get install -y apache2 apache2-dev apache2-utils && \
+  mkdir /usr/local/lib/apache2 && \
+  cd /etc/apache2/mods-available && \
+  ln -s /usr/local/lib/apache2/learn.conf learn.conf && \
+  echo "LoadModule learn_module /usr/local/lib/apache2/mod_learn.so" > learn.load && \
+  a2enmod learn && \
+  chmod +x /etc/rc.local
+
+VOLUME ["/var/www", "/usr/local/lib/apache2"]
+
+EXPOSE 80
+# Run with
+# cd [apache-module-workdir];
+# docker run -d -p 8888:80 \
+# -v $PWD:/usr/local/lib/apache2 \
+# ${NAMESPACE}/apache
+#+END_SRC
+
+If we run it,
+
+#+BEGIN_SRC
+docker run -d -p 8888:80 acmsl/apache
+#+END_SRC
+
+we can check the Apache process is not running.
+Within the container,
+we don't have to guess
+what the error is.
+It doesn't find our module,
+and, since we have enabled it,
+it refuses to start.
+
+#+BEGIN_SRC
+> docker exec -it [container-id] /bin/bash
+root@[container-id]:/# /etc/init.d/apache2 status
+ * apache2 is not running
+root@[container-id]:/# /etc/init.d/apache2 start 
+ * Starting web server apache2
+ * 
+ * The apache2 configtest failed.
+Output of config test was:
+apache2: Syntax error on line 140 of /etc/apache2/apache2.conf: \
+Syntax error on line 1 of /etc/apache2/mods-enabled/learn.load: \
+Cannot load /usr/local/lib/apache2/mod_learn.so into server: \
+/usr/local/lib/apache2/mod_learn.so: cannot open shared object \
+file: No such file or directory
+Action 'configtest' failed.
+The Apache error log may have more information.
+#+END_SRC
+
+** First attempt
+
+Now that we have set up the Docker image,
+we can start following the Apache guide
+to build a sample module.
+
+We first create a new folder somewhere:
+
+#+BEGIN_SRC
+> mkdir apache-module
+> cd apache-module
+#+END_SRC
+
+Then, define the =AP_MODULE_DECLARE_DATA= module,
+in a new =mod_learn.c= file
+
+#+BEGIN_SRC C
+/* Include the required headers from httpd */
+#include "httpd.h"
+#include "http_core.h"
+#include "http_protocol.h"
+#include "http_request.h"
+
+/* Define prototypes of our functions in this module */
+static void register_hooks(apr_pool_t *pool);
+static int learn_handler(request_rec *r);
+
+/* Define our module as an entity and assign a function for registering hooks  */
+
+module AP_MODULE_DECLARE_DATA learn_module =
+{
+    STANDARD20_MODULE_STUFF,
+    NULL,            // Per-directory configuration handler
+    NULL,            // Merge handler for per-directory configurations
+    NULL,            // Per-server configuration handler
+    NULL,            // Merge handler for per-server configurations
+    NULL,            // Any directives we may have for httpd
+    register_hooks   // Our hook registering function
+};
+
+/* register_hooks: Adds a hook to the httpd process */
+static void register_hooks(apr_pool_t *pool) 
+{
+    /* Hook the request handler */
+    ap_hook_handler(example_handler, NULL, NULL, APR_HOOK_LAST);
+}
+
+/* The handler function for our module.
+ * This is where all the fun happens!
+ */
+static int learn_handler(request_rec *r)
+{
+    /* First off, we need to check if this is a call for the "learn" handler.
+     * If it is, we accept it and do our things, it not, we simply return DECLINED,
+     * and Apache will try somewhere else.
+     */
+    if (!r->handler || strcmp(r->handler, "example-handler")) return (DECLINED);
+    
+    // The first thing we will do is write a simple "Hello, world!" back to the client.
+    ap_rputs("Hello, world!<br/>", r);
+    return OK;
+}
+#+END_SRC
+
+However, it doesn't compile:
+
+#+BEGIN_SRC
+$ apxs -i -a -c mod_learn.c 
+Use of uninitialized value $ENV{"LDFLAGS"} in concatenation (.) or string at /usr/bin/apxs line 423.
+/usr/share/build-1/libtool --silent --mode=compile x86_64-pc-linux-gnu-gcc -prefer-pic \
+ -march=native -O2 -pipe -mmmx -msse -msse2 -mssse3 -msse4.1 -msse4.2  -DLINUX \
+ -D_REENTRANT -D_GNU_SOURCE -pthread -I/usr/include/apache2  -I/usr/include/apr-1 \
+ -I/usr/include/apr-1 -I/usr/include/db4.8  -c -o mod_learn.lo mod_learn.c && \
+touch mod_learn.slo
+mod_learn.c:13:1: error: unknown type name 'module'
+ module AP_MODULE_DECLARE_DATA learn_module =
+ ^
+mod_learn.c:15:5: error: 'STANDARD20_MODULE_STUFF' undeclared here (not in a function)
+     STANDARD20_MODULE_STUFF,
+     ^
+mod_learn.c:16:5: warning: excess elements in scalar initializer
+     NULL,            // Per-directory configuration handler
+     ^
+mod_learn.c:16:5: warning: (near initialization for 'learn_module')
+mod_learn.c:17:5: warning: excess elements in scalar initializer
+     NULL,            // Merge handler for per-directory configurations
+     ^
+mod_learn.c:17:5: warning: (near initialization for 'learn_module')
+mod_learn.c:18:5: warning: excess elements in scalar initializer
+     NULL,            // Per-server configuration handler
+     ^
+mod_learn.c:18:5: warning: (near initialization for 'learn_module')
+mod_learn.c:19:5: warning: excess elements in scalar initializer
+     NULL,            // Merge handler for per-server configurations
+     ^
+mod_learn.c:19:5: warning: (near initialization for 'learn_module')
+mod_learn.c:20:5: warning: excess elements in scalar initializer
+     NULL,            // Any directives we may have for httpd
+     ^
+mod_learn.c:20:5: warning: (near initialization for 'learn_module')
+mod_learn.c:22:1: warning: excess elements in scalar initializer
+ };
+ ^
+mod_learn.c:22:1: warning: (near initialization for 'learn_module')
+apxs:Error: Command failed with rc=65536
+.
+#+END_SRC
+
+After googling this,
+the [[https://askubuntu.com/questions/418755/apache-module-compilation-failure][solution]] is simple: add a new /include/ directive
+at the end.
+
+#+BEGIN_SRC
+[..]
+#include "http_request.h"
+#include "http_config.h"
+[..]
+#+END_SRC
+
+Now it compiles, but cannot copy the file
+to a destination location
+which is not what we need.
+
+#+BEGIN_SRC
+> apxs -i -a -c mod_learn.c 
+Use of uninitialized value $ENV{"LDFLAGS"} in concatenation (.) \
+or string at /usr/bin/apxs line 423.
+/usr/share/build-1/libtool --silent --mode=compile x86_64-pc-linux-gnu-gcc \
+ -prefer-pic -march=native -O2 -pipe -mmmx -msse -msse2 -mssse3 -msse4.1 -msse4.2 \
+ -DLINUX -D_REENTRANT -D_GNU_SOURCE -pthread -I/usr/include/apache2 \
+ -I/usr/include/apr-1   -I/usr/include/apr-1 -I/usr/include/db4.8 \
+ -c -o mod_learn.lo mod_learn.c && touch mod_learn.slo
+/usr/share/build-1/libtool --silent --mode=link x86_64-pc-linux-gnu-gcc \
+ -o mod_learn.la   -rpath /usr/lib64/apache2/modules -module -avoid-version \
+   mod_learn.lo
+/usr/lib64/apache2/build/instdso.sh SH_LIBTOOL='/usr/share/build-1/libtool' \
+ mod_learn.la /usr/lib64/apache2/modules
+/usr/share/build-1/libtool --mode=install cp mod_learn.la /usr/lib64/apache2/modules/
+libtool: install: cp .libs/mod_learn.so /usr/lib64/apache2/modules/mod_learn.so
+cp: cannot create regular file '/usr/lib64/apache2/modules/mod_learn.so': Permission denied
+apxs:Error: Command failed with rc=65536
+.
+#+END_SRC
+
+We want it to create the =mod_learn.so" file
+therein.
+
+=apxs= allows working with /template modules/,
+so let's check it out:
+
+#+BEGIN_SRC
+apxs -g -n learn
+#+END_SRC
+
+This creates a =learn= folder with the following files:
+- =Makefile=: rules to build the module;
+- =modules.mk=: additional rules included in the Makefile (indirectly via =/usr/lib64/apache2/build/special.mk=);
+- =mod_learn.c=: a sample module;
+- =.deps=: an empty file.
+
+However, in order to customize where the final =.so= file gets created,
+we'd need to copy some files (=instdso.sh=, =config_vars.mk=, =rules.mk=, =special.mk=)
+from Apache (=/usr/lib64/apache2/build=) to our folder,
+and perform some changes in some internal variables
+used when compiling.
+Some of the changes require us to use
+absolute paths,
+which is something we should avoid.
+
+Anyway, here are the required changes:
+- =rules.mk=
+#+BEGIN_SRC diff
+19c19                
+< include  $(top_builddir)/config_vars.mk
+---                  
+> include  $(top_builddir)/build/config_vars.mk
+#+END_SRC
+- =instdso.sh=: copy it from =/usr/lib64/apache2/build=.
+- =config_vars.mk=
+#+BEGIN_SRC diff
+5,6c5                
+< #exp_libexecdir = /usr/lib64/apache2/modules
+< exp_libexecdir = . 
+---                  
+> exp_libexecdir = /usr/lib64/apache2/modules
+10,11c9              
+< #exp_installbuilddir = /usr/lib64/apache2/build
+< exp_installbuilddir = .
+---                  
+> exp_installbuilddir = /usr/lib64/apache2/build
+45,46c43             
+< #libexecdir = /usr/lib64/apache2/modules
+< libexecdir = [our-working-directory]
+---                  
+> libexecdir = /usr/lib64/apache2/modules
+53,54c50             
+< #installbuilddir = /usr/lib64/apache2/build
+< installbuilddir = .
+---                  
+> installbuilddir = /usr/lib64/apache2/build
+#+END_SRC
+- =special.mk=
+#+BEGIN_SRC diff
+27c27                
+< include $(top_builddir)/rules.mk
+---                  
+> include $(top_builddir)/build/rules.mk
+32c32                
+<         $(top_srcdir)/instdso.sh SH_LIBTOOL='$(SH_LIBTOOL)' $$i $(DESTDIR)$(libexecdir); \
+---                  
+>         $(top_srcdir)/build/instdso.sh SH_LIBTOOL='$(SH_LIBTOOL)' $$i $(DESTDIR)$(libexecdir); \
+#+END_SRC
+
+After these changes, running
+#+BEGIN_SRC bash
+> make
+#+END_SRC
+
+generates our beloved =mod_learn.dso= module.
+However, our Docker container doesn't accept it.
+
+#+BEGIN_SRC
+root@[container-id]:/# /etc/init.d/apache2 start
+ * Starting web server apache2
+ * 
+ * The apache2 configtest failed.
+Output of config test was:
+apache2: Syntax error on line 140 of /etc/apache2/apache2.conf: \
+ Syntax error on line 1 of /etc/apache2/mods-enabled/learn.load: \
+ Cannot load /usr/local/lib/apache2/mod_learn.so into server: \
+mod_learn.so: undefined symbol: ap_rputs
+Action 'configtest' failed.
+The Apache error log may have more information.
+#+END_SRC
+
+The cause is a mismatch between the =apxs= tool I used to compile the module,
+and the Apache which is trying to use it.
+
+** Second attempt
+
+If we compile and build in the same environment
+as we work, things should work fine.
+
+Let's start over. We need to install =libtool= package in our
+Docker image. And we'd like also to avoid coupling the image
+to the name of our Apache modules.
+
+The Dockerfile is now:
+
+#+BEGIN_SRC
+FROM ${NAMESPACE}/base:${TAG}
+MAINTAINER ${MAINTAINER}
+
+RUN \
+  DEBIAN_FRONTEND=noninteractive \
+  apt-get install -y apache2 apache2-dev apache2-utils libtool && \
+  mkdir /usr/local/lib/apache2
+
+COPY rc.local /etc/rc.local
+
+VOLUME ["/var/www", "/usr/local/lib/apache2"]
+
+EXPOSE 80
+#+END_SRC
+
+And the biggest changes are in the =rc.local= startup script,
+since it now looks for any modules in the host volume,
+so that Apache can see them.
+
+#+BEGIN_SRC bash
+#!/bin/bash
+
+cd /etc/apache2/mods-available;
+
+for d in $(find /usr/local/lib/apache2/ -maxdepth 1 -type d); do
+  for ext in load conf; do
+    ln -s ${d}/$(basename ${d}).${ext} $(basename ${d}).${ext};
+  done
+  a2enmod $(basename ${d});
+done
+
+service apache2 start
+#+END_SRC
+
+We'll compile our code
+inside the container from now on.
+
+Let's start with the default sample module
+generated by =apxs=.
+
+#+BEGIN_SRC
+root@[container-id]:/usr/local/lib/apache2# rm -rf learn
+root@[container-id]:/usr/local/lib/apache2# apxs -g -n learn
+Creating [DIR]  learn
+Creating [FILE] learn/Makefile
+Creating [FILE] learn/modules.mk
+Creating [FILE] learn/mod_learn.c
+Creating [FILE] learn/.deps
+root@[container-id]:/usr/local/lib/apache2# cd learn
+root@[container-id]:/usr/local/lib/apache2/learn# make
+[..]
+root@[container-id]:/usr/local/lib/apache2/learn# make install
+[..]
+#+END_SRC
+
+To test if it works, we have to create two files:
+one to load our module, and another one to bind it to the Apache flow.
+
+#+BEGIN_SRC
+root@[container-id]:/usr/local/lib/apache2/learn# cat <<EOF > learn.load
+LoadModule learn_module /usr/lib/apache2/modules/mod_learn.so
+EOF
+root@[container-id]:/usr/local/lib/apache2/learn# cat <<EOF > learn.conf
+<IfModule mod_learn.c>
+  <Location "/learn">
+    SetHandler learn
+  </Location>
+</IfModule>
+EOF
+#+END_SRC
+
+When we visit now [[http://localhost:8888/learn][http://localhost:8888/learn]], we can see
+the following text:
+
+#+BEGIN_SRC
+The sample page from mod_learn.c
+#+END_SRC
+
+To be confident we can change our module
+and check those changes quickly,
+let's modify the sample text.
+
+To do that, we first have to change the permissions
+of the files, since we created them inside the container,
+as root.
+
+#+BEGIN_SRC
+> chmod a+w *.c
+#+END_SRC
+
+Additionally, we'd like to automate the process
+of compiling the source files,
+installing the module,
+and restarting Apache,
+when we change anything.
+
+We can use a simple script for that, adapted from a [[https://serverfault.com/questions/1669/shell-command-to-monitor-changes-in-a-file-whats-it-called-again][serverfault]] answer:
+#+BEGIN_SRC
+#!/bin/bash
+
+function compile() {
+    make > /dev/null && \
+    make install > /dev/null
+}
+
+FILE="$1"
+LAST=$(md5sum "$FILE")
+while true; do
+  sleep 1
+  NEW=$(md5sum "$FILE")
+  if [ "$NEW" != "$LAST" ]; then
+    LAST="$NEW"
+    compile && \
+    service apache2 restart > /dev/null 3>&1 2>&1 > /dev/null && \
+    echo "Apache restarted as ${FILE} changed"
+  fi
+done
+#+END_SRC
+
+We have to run this script
+when the container starts,
+so we'll add it
+to our =rc.local= script.
+
+#+BEGIN_SRC
+#!/bin/bash
+
+for d in $(find /usr/local/lib/apache2/ -maxdepth 1 -type d); do
+  cd /etc/apache2/mods-available;
+  for ext in load conf; do
+    ln -s ${d}/$(basename ${d}).${ext} $(basename ${d}).${ext};
+  done
+  cd ${d};
+  for f in $(find . -maxdepth 1 -name '*.c'); do
+    # We don't need the ${d} parameter
+    # but it makes easier to find out
+    # which folder is being monitored
+    # when inspecting processes via ps -ef
+    /usr/local/bin/watch_module_changes.sh ${f} ${d} &
+  done
+  a2enmod $(basename ${d});
+done
+
+# To prevent issues with invalid modules
+# when starting up, we let the container
+# launch even if Apache initially doesn't.
+service apache2 restart &
+
+exit 0
+#+END_SRC
+
+The Dockerfile needs to include the new script.
+
+#+BEGIN_SRC
+FROM ${NAMESPACE}/base:${TAG}
+MAINTAINER ${MAINTAINER}
+
+COPY rc.local /etc/rc.local
+COPY watch_module_changes.sh /usr/local/bin/watch_module_changes.sh
+
+RUN \
+  DEBIAN_FRONTEND=noninteractive \
+  apt-get install -y apache2 apache2-dev apache2-utils libtool && \
+  mkdir /usr/local/lib/apache2 && \
+  chmod +x /etc/rc.local /usr/local/bin/watch_module_changes.sh
+
+VOLUME ["/var/www", "/usr/local/lib/apache2"]
+
+EXPOSE 80
+#+END_SRC
+
+** Enabling automatic reload
+
+To make our changes
+immediately visible,
+we can setup [[https://nitoyon.github.io/livereloadx/][LiveReloadX]]
+to receive notifications from our =watch_module_changes.sh=,
+and refresh the page for us.
+
+We need to install the tool first.
+
+#+BEGIN_SRC
+> sudo npm install -g livereloadx
+#+END_SRC
+
+Then, add the [[http://download.livereload.com/2.1.0/LiveReload-2.1.0.xpi][Firefox extension]],
+and setup a new reload rule:
+- url: *http://localhost:8888/learn*
+- File: *[module-folder]/mod_learn.c*
+- Execute action: *Force reload document*
+
+** Learning about Apache modules
+
+Now that we have a proper environment,
+we can start learning
+Apache's internal API.
+
+Let's print what information
+we have access to.
+
+#+BEGIN_SRC
+/* 
+**  mod_learn.c -- Apache sample learn module
+**  [Autogenerated via ``apxs -n learn -g'']
+**
+**  To play with this sample module first compile it into a
+**  DSO file and install it into Apache's modules directory 
+**  by running:
+**
+**    $ apxs -c -i mod_learn.c
+**
+**  Then activate it in Apache's apache2.conf file for instance
+**  for the URL /learn in as follows:
+**
+**    #   apache2.conf
+**    LoadModule learn_module modules/mod_learn.so
+**    <Location /learn>
+**    SetHandler learn
+**    </Location>
+**
+**  Then after restarting Apache via
+**
+**    $ apachectl restart
+**
+**  you immediately can request the URL /learn and watch for the
+**  output of this module. This can be achieved for instance via:
+**
+**    $ lynx -mime_header http://localhost/learn 
+**
+**  The output should be similar to the following one:
+**
+**    HTTP/1.1 200 OK
+**    Date: Tue, 31 Mar 1998 14:42:22 GMT
+**    Server: Apache/1.3.4 (Unix)
+**    Connection: close
+**    Content-Type: text/html
+**  
+**    The sample page from mod_learn.c
+*/ 
+
+#include "httpd.h"
+#include "http_config.h"
+#include "http_protocol.h"
+#include "ap_config.h"
+
+static void print_string(const char *name, char *value, request_rec *r) {
+    ap_rputs("<dt>", r);
+    ap_rputs(name, r);
+    ap_rputs("</dt>\n", r);
+    ap_rputs("<dd>", r);
+    if (value == NULL) {
+        ap_rputs("null", r);
+    } else {
+        ap_rputs(value, r);
+    }
+    ap_rputs("</dd>\n", r);
+}
+
+static void print_pool(request_rec *r) {
+    print_string("r->pool", "TODO", r);
+}
+
+static void print_connection(request_rec *r) {
+    print_string("r->connection", "TODO", r);
+}
+
+static void print_server(request_rec *r) {
+    print_string("r->server", "TODO", r);
+}
+
+static void print_next(request_rec *r) {
+    print_string("r->next", "TODO", r);
+}
+
+static void print_prev(request_rec *r) {
+    print_string("r->prev", "TODO", r);
+}
+
+static void print_main(request_rec *r) {
+    print_string("r->main", "TODO", r);
+}
+
+static char * itoa(int value) {
+    int LENGTH = (CHAR_BIT * sizeof(int) - 1) / 3 + 2;
+    char result[LENGTH];
+    snprintf(result, LENGTH, "%d", value);
+    return &result;
+}
+
+static void print_int(char *name, int value, request_rec *r) {
+    ap_rputs("<dt>", r);
+    ap_rputs(name, r);
+    ap_rputs("</dt><dd>", r);
+    ap_rputs(itoa(value), r);
+    ap_rputs("</dd>\n", r);
+}
+
+static void print_request_time(request_rec *r) {
+    print_string("r->request_time", "TODO", r);
+}
+
+static int learn_handler(request_rec *r)
+{
+    if (strcmp(r->handler, "learn")) {
+        return DECLINED;
+    }
+
+    r->content_type = "text/html";      
+
+    if (!r->header_only) {
+        ap_rputs("<html><head><title>Learn module</title></head><body><dl>\n", r);
+        print_pool(r);
+        print_connection(r);
+        print_server(r);
+        print_next(r);
+        print_prev(r);
+        print_main(r);
+        print_string("r->the_request", r->the_request, r);
+        print_int("r->assbackwards", r->assbackwards, r);
+        print_int("r->proxyreq", r->proxyreq, r);
+        print_int("r->header_only", r->header_only, r);
+        print_int("r->proto_num", r->proto_num, r);
+        //        print_string("r->handler", r->handler, r);
+        print_string("r->protocol", r->protocol, r);
+        print_string("r->hostname", r->hostname, r);
+        print_request_time(r);
+        print_string("r->status_line", r->status_line, r);
+        print_int("r->status", r->status, r);
+        print_int("r->method_number", r->method_number, r);
+        print_string("r->method", r->method, r);
+        //
+        print_string("r->range", r->range, r);
+        print_string("r->content_type", r->content_type, r);
+        print_string("r->content_encoding", r->content_encoding, r);
+        print_string("r->vlist_validator", r->vlist_validator, r);
+        print_string("r->user", r->user, r);
+        print_string("r->ap_auth_type", r->ap_auth_type, r);
+        print_string("r->unparsed_uri", r->unparsed_uri, r);
+        print_string("r->uri", r->uri, r);
+        print_string("r->filename", r->filename, r);
+        print_string("r->canonical_filename", r->canonical_filename, r);
+        print_string("r->path_info", r->path_info, r);
+        print_string("r->args", r->args, r);
+        print_string("r->log_id", r->log_id, r);
+        print_string("r->useragent_ip", r->useragent_ip, r);
+        ap_rputs("</dl></body></html>\n", r);
+    }
+    return OK;
+}
+
+static void learn_register_hooks(apr_pool_t *p)
+{
+    ap_hook_handler(learn_handler, NULL, NULL, APR_HOOK_MIDDLE);
+}
+
+/* Dispatch list for API hooks */
+module AP_MODULE_DECLARE_DATA learn_module = {
+    STANDARD20_MODULE_STUFF, 
+    NULL,                  /* create per-dir    config structures */
+    NULL,                  /* merge  per-dir    config structures */
+    NULL,                  /* create per-server config structures */
+    NULL,                  /* merge  per-server config structures */
+    NULL,                  /* table of config file commands       */
+    learn_register_hooks  /* register hooks                      */
+};
+#+END_SRC
+
+* Troubleshooting
+** The Docker container does not start
+
+If after launching your docker container,
+it dies immediately
+(it's not listed in =docker ps=),
+run it without the =-d= flag.
+
+#+BEGIN_SRC
+docker run -p 8888:80 -v $PWD:/usr/local/lib/apache2 [namespace]/apache
+#+END_SRC
+
+You'll be able to inspect the problem,
+as it will be displayed in the console.
+
+** Apache does not load my module
+
+Things to check:
+- There's a =[module].conf= file in your working directory.
+- Such file is linked from =/etc/apache2/mods-available= within the Docker container.
+- The module is enabled (=mod2enmod [module]=).
+- The module's =[module].load= file exists in your working directory,
+and its contents point to =/usr/lib/apache2/modules/[module].so=.
+** Problems installing LiveReloadX
+
+LiveReloadX requires Python,
+but it's only compatible with releases
+between versions 2.5.0 and 3.0.0.
+
+You'll have to install a compatible version
+before attempting to install LiveReloadX.
