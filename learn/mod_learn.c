@@ -36,11 +36,17 @@
 **  
 **    The sample page from mod_learn.c
 */ 
-
 #include "httpd.h"
 #include "http_config.h"
 #include "http_protocol.h"
 #include "ap_config.h"
+
+static char * itoa(int value) {
+    int LENGTH = (CHAR_BIT * sizeof(int) - 1) / 3 + 2;
+    char result[LENGTH];
+    snprintf(result, LENGTH, "%d", value);
+    return &result;
+}
 
 static void print_string(const char *name, char *value, request_rec *r) {
     ap_rputs("<dt>", r);
@@ -55,8 +61,16 @@ static void print_string(const char *name, char *value, request_rec *r) {
     ap_rputs("</dd>\n", r);
 }
 
+static void print_int(char *name, int value, request_rec *r) {
+    ap_rputs("<dt>", r);
+    ap_rputs(name, r);
+    ap_rputs("</dt><dd>", r);
+    ap_rputs(itoa(value), r);
+    ap_rputs("</dd>\n", r);
+}
+
 static void print_pool(request_rec *r) {
-    print_string("r->pool", "TODO", r);
+    print_int("r->pool", &r->pool, r);
 }
 
 static void print_connection(request_rec *r) {
@@ -79,19 +93,128 @@ static void print_main(request_rec *r) {
     print_string("r->main", "TODO", r);
 }
 
-static char * itoa(int value) {
-    int LENGTH = (CHAR_BIT * sizeof(int) - 1) / 3 + 2;
-    char result[LENGTH];
-    snprintf(result, LENGTH, "%d", value);
-    return &result;
+static void print_allowed_xmethods(request_rec *r) {
+    print_string("r->allowed_xmethods", "TODO", r);
 }
 
-static void print_int(char *name, int value, request_rec *r) {
-    ap_rputs("<dt>", r);
-    ap_rputs(name, r);
-    ap_rputs("</dt><dd>", r);
-    ap_rputs(itoa(value), r);
-    ap_rputs("</dd>\n", r);
+static void print_allowed_methods(request_rec *r) {
+    print_string("r->allowed_methods", "TODO", r);
+}
+
+static void print_sent_bodyct(request_rec *r) {
+    print_string("r->sent_bodyct", "TODO", r);
+}
+
+static void print_bytes_sent(request_rec *r) {
+    print_string("r->bytes_sent", "TODO", r);
+}
+
+static void print_mtime(request_rec *r) {
+    print_string("r->mtime", "TODO", r);
+}
+
+static void print_clength(request_rec *r) {
+    print_string("r->clength", "TODO", r);
+}
+
+static void print_kept_body(request_rec *r) {
+    print_string("r->kept_body", "TODO", r);
+}
+
+static void print_body_table(request_rec *r) {
+    print_string("r->body_table", "TODO", r);
+}
+
+static void print_remaining(request_rec *r) {
+    print_string("r->remaining", "TODO", r);
+}
+
+static void print_read_length(request_rec *r) {
+    print_string("r->read_length", "TODO", r);
+}
+
+static void print_headers_in(request_rec *r) {
+    print_string("r->headers_in", "TODO", r);
+}
+
+static void print_headers_out(request_rec *r) {
+    print_string("r->headers_out", "TODO", r);
+}
+
+static void print_err_headers_out(request_rec *r) {
+    print_string("r->err_headers_out", "TODO", r);
+}
+
+static void print_subprocess_env(request_rec *r) {
+    print_string("r->subprocess_env", "TODO", r);
+}
+
+static void print_notes(request_rec *r) {
+    print_string("r->notes", "TODO", r);
+}
+
+static void print_handler(request_rec *r) {
+    print_string("r->handler", "TODO", r);
+}
+
+static void print_content_languages(request_rec *r) {
+    print_string("r->content_languages", "TODO", r);
+}
+
+static void print_per_dir_config(request_rec *r) {
+    print_string("r->per_dir_config", "TODO", r);
+}
+
+static void print_request_config(request_rec *r) {
+    print_string("r->request_config", "TODO", r);
+}
+
+static void print_log(request_rec *r) {
+    print_string("r->log", "TODO", r);
+}
+
+static void print_htaccess(request_rec *r) {
+    print_string("r->htaccess", "TODO", r);
+}
+
+static void print_output_filters(request_rec *r) {
+    print_string("r->output_filters", "TODO", r);
+}
+
+static void print_input_filters(request_rec *r) {
+    print_string("r->input_filters", "TODO", r);
+}
+
+static void print_proto_output_filters(request_rec *r) {
+    print_string("r->proto_output_filters", "TODO", r);
+}
+
+static void print_proto_input_filters(request_rec *r) {
+    print_string("r->proto_input_filters", "TODO", r);
+}
+
+static void print_invoke_mix(request_rec *r) {
+    print_string("r->invoke_mix", "TODO", r);
+}
+
+static void print_parsed_uri(request_rec *r) {
+    print_string("r->parsed_uri", "TODO", r);
+}
+
+static void print_finfo(request_rec *r) {
+    print_string("r->finfo", "TODO", r);
+}
+
+static void print_useragent_addr(request_rec *r) {
+    print_string("r->useragent_addr", "TODO", r);
+}
+
+static void print_trailers_in(request_rec *r) {
+    print_string("r->trailers_in", "TODO", r);
+}
+
+static void print_trailers_out(request_rec *r) {
+    print_string("r->trailers_out", "TODO", r);
 }
 
 static void print_request_time(request_rec *r) {
@@ -119,7 +242,6 @@ static int learn_handler(request_rec *r)
         print_int("r->proxyreq", r->proxyreq, r);
         print_int("r->header_only", r->header_only, r);
         print_int("r->proto_num", r->proto_num, r);
-        //        print_string("r->handler", r->handler, r);
         print_string("r->protocol", r->protocol, r);
         print_string("r->hostname", r->hostname, r);
         print_request_time(r);
@@ -127,10 +249,31 @@ static int learn_handler(request_rec *r)
         print_int("r->status", r->status, r);
         print_int("r->method_number", r->method_number, r);
         print_string("r->method", r->method, r);
-        //
+        print_int("r->allowed", r->allowed, r);
+        print_allowed_xmethods(r);
+        print_allowed_methods(r);
+        print_sent_bodyct(r);
+        print_bytes_sent(r);
+        print_mtime(r);
         print_string("r->range", r->range, r);
+        print_clength(r);
+        print_int("r->chunked", r->chunked, r);
+        print_int("r->read_body", r->read_body, r);
+        print_int("r->read_chunked", r->read_chunked, r);
+        print_int("r->expecting_100", r->expecting_100, r);
+        print_kept_body(r);
+        print_body_table(r);
+        print_remaining(r);
+        print_read_length(r);
+        print_headers_in(r);
+        print_headers_out(r);
+        print_err_headers_out(r);
+        print_subprocess_env(r);
+        print_notes(r);
         print_string("r->content_type", r->content_type, r);
+        print_handler(r);
         print_string("r->content_encoding", r->content_encoding, r);
+        print_content_languages(r);
         print_string("r->vlist_validator", r->vlist_validator, r);
         print_string("r->user", r->user, r);
         print_string("r->ap_auth_type", r->ap_auth_type, r);
@@ -140,8 +283,26 @@ static int learn_handler(request_rec *r)
         print_string("r->canonical_filename", r->canonical_filename, r);
         print_string("r->path_info", r->path_info, r);
         print_string("r->args", r->args, r);
+        print_int("r->used_path_info", r->used_path_info, r);
+        print_int("r->eos_sent", r->eos_sent, r);
+        print_per_dir_config(r);
+        print_request_config(r);
+        print_log(r);
         print_string("r->log_id", r->log_id, r);
+        print_htaccess(r);
+        print_output_filters(r);
+        print_input_filters(r);
+        print_proto_output_filters(r);
+        print_proto_input_filters(r);
+        print_int("r->no_cache", r->no_cache, r);
+        print_int("r->no_local_copy", r->no_local_copy, r);
+        print_invoke_mix(r);
+        print_parsed_uri(r);
+        print_finfo(r);
+        print_useragent_addr(r);
         print_string("r->useragent_ip", r->useragent_ip, r);
+        print_trailers_in(r);
+        print_trailers_out(r);
         ap_rputs("</dl></body></html>\n", r);
     }
     return OK;
