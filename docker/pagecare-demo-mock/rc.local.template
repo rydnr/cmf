@@ -1,0 +1,144 @@
+#!/bin/bash
+
+_host=${VIRTUAL_HOST%:*}
+_host=${_host:-$(hostname)}
+_noWwwHost=${_host#www.*}
+_port=${VIRTUAL_HOST#*:}
+if [ "${_port}" == "${VIRTUAL_HOST}" ]; then
+  _port=80
+fi
+
+cat <<EOF > /etc/apache2/sites-available/${_host}.conf
+<VirtualHost *:80>
+    ServerName ${_host}
+EOF
+if [ "${_noWwwHost}" != "${_host}" ]; then
+    cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    ServerAlias ${_noWwwHost}
+EOF
+fi
+
+cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    RewriteEngine On
+EOF
+
+for _url in ${URLS}; do
+    if [ "${_url}" == "/" ]; then
+        cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    RewriteRule ^/?$ ${APIARYIO_PRIVATE_URL}/${_host}/ [L,P]
+EOF
+    else
+        cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    RewriteRule ^${_url}$ ${APIARYIO_PRIVATE_URL}/${_host}${_url} [L,P]
+EOF
+    fi
+done
+
+cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    RewriteRule ^(.*)$ http://${_host}\$1 [L,P]
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName ${_host}
+EOF
+
+if [ "${_noWwwHost}" != "${_host}" ]; then
+    cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    ServerAlias ${_noWwwHost}
+EOF
+fi
+
+cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    GnuTLSEnable on
+    GnuTLSPriorities NORMAL:!DHE-RSA:!DHE-DSS:!AES-256-CBC:%COMPAT
+
+    GnuTLSCertificateFile /etc/ssl/certs/${_host}.crt
+    GnuTLSKeyFile /etc/ssl/private/${_host}.key
+
+    RewriteEngine On
+EOF
+
+for _url in ${URLS}; do
+    if [ "${_url}" == "/" ]; then
+        cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    RewriteRule ^/?$ https://${APIARYIO_PRIVATE_URL#http://}/${_host}/ [L,P]
+EOF
+    else
+        cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    RewriteRule ^${_url}$ https://${APIARYIO_PRIVATE_URL#http://}/${_host}${_url} [L,P]
+EOF
+    fi
+done
+
+cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    RewriteRule ^(.*)$ https://${_host}\$1 [L,P]
+</VirtualHost>
+EOF
+
+cat <<EOF > /etc/apache2/ports.conf
+Listen ${_port}
+
+<IfModule ssl_module>
+        Listen 443
+</IfModule>
+
+<IfModule mod_gnutls.c>
+        Listen 443
+</IfModule>
+
+# vim: syntax=apache ts=4 sw=4 sts=4 sr noet
+EOF
+
+cat <<EOF > /tmp/${APIARYIO_API_NAME}.apib
+FORMAT: 1A
+
+# PageCare
+
+PageCare provides a simple API to serve third-party websites.
+
+# Serve [/${_host}]
+
+Third-party web content.
+
+EOF
+for _url in ${URLS}; do
+    cat <<EOF >> /tmp/${APIARYIO_API_NAME}.apib
+## Retrieve URL [/${_host}${_url}]
+
+### View ${_host}${_url} [GET]
+
++ Response 200 (text/html)
+
+$(curl -L -s http://${VIRTUAL_HOST}${_url} | sed 's/\xe1/a/g' | sed 's/\xf1/n/g' | sed 's/\xa1/ /g' | sed 's/\xed/i/g' | sed 's/^/        /g')
+EOF
+done
+
+apiary publish --api-name=${APIARYIO_API_NAME} --path=/tmp/${APIARYIO_API_NAME}.apib --message="Testing PageCare API with ${_host} mock"
+
+cd /etc/ssl
+envsubst < /etc/ssl/pagecare.template > /etc/ssl/${_host}.template
+
+certtool --generate-privkey --outfile /etc/ssl/private/${_host}.key
+certtool --generate-request \
+         --load-privkey /etc/ssl/private/${_host}.key \
+         --template /etc/ssl/${_host}.template \
+         --outfile /etc/ssl/private/${_host}.csr
+
+certtool --generate-certificate --load-request /etc/ssl/private/${_host}.csr \
+         --load-ca-certificate /etc/ssl/certs/pagecare.crt \
+         --load-ca-privkey /etc/ssl/private/pagecare.key \
+         --template /etc/ssl/${_host}.template \
+         --outfile /etc/ssl/certs/${_host}.crt
+
+chmod 755 /etc/ssl/certs/${_host}.crt
+
+a2ensite ${_host}
+a2dismod ssl
+a2enmod proxy
+a2enmod proxy_http
+a2enmod rewrite
+a2enmod gnutls
+
+service apache2 start &
+
+exit 0

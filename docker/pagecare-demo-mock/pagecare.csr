@@ -1,0 +1,72 @@
+PKCS #10 Certificate Request Information:
+	Version: 1
+	Subject: CN=PagePare,OU=PageCare,O=PageCare,L=Madrid,ST=Madrid,C=ES,DC=PageCare,UID=001
+	Subject Public Key Algorithm: RSA
+	Algorithm Security Level: Medium (2048 bits)
+		Modulus (bits 2048):
+			00:d9:39:d0:6b:cc:5c:1e:4c:e0:0f:10:9c:0a:ed:d2
+			c4:35:6f:7a:8a:ad:eb:bf:0c:97:cb:68:65:c4:0d:68
+			35:04:bc:84:7f:c7:1b:cd:a8:bb:4c:96:ca:1f:8e:19
+			5c:3c:54:ae:e5:55:11:6d:71:04:6a:5b:a9:78:6f:c9
+			59:cc:47:7b:a2:ff:bc:78:a5:90:1e:fe:b7:61:4d:94
+			e5:75:9b:6b:1a:43:ed:10:2f:5f:38:55:b4:ed:81:f2
+			63:45:79:51:ef:5b:86:f6:c8:03:ed:d9:6c:35:1b:03
+			ba:8b:0f:a6:13:15:2e:6c:fb:29:88:61:95:b9:82:88
+			71:68:15:b9:f6:ed:a7:51:23:39:88:b5:ea:7e:1b:2f
+			bd:65:84:62:0f:2d:25:10:c8:9b:7a:ea:44:67:10:12
+			46:59:7f:bd:ea:a4:50:72:74:7a:e0:d1:38:14:05:77
+			9c:5a:58:f8:8f:71:30:b7:b2:a1:2d:31:a1:b2:cd:7a
+			5d:f9:8e:04:3c:73:97:1e:a9:ff:cb:fe:74:79:a1:53
+			2b:32:8c:cd:49:9b:6b:e7:9f:b9:7d:ff:d8:4d:f0:d2
+			cb:2b:c7:c7:28:8d:44:37:b9:29:68:00:1d:ea:ad:09
+			18:f7:1e:7b:44:9c:a6:fa:50:18:d6:47:35:e6:37:09
+			63
+		Exponent (bits 24):
+			01:00:01
+	Attributes:
+		Extensions:
+			Subject Alternative Name (not critical):
+				DNSname: page.care
+				DNSname: pagecare.com.
+				DNSname: PageCare
+				RFC822Name: jose.sanleandro@witworks.es
+			Basic Constraints (critical):
+				Certificate Authority (CA): TRUE
+			Key Purpose (critical):
+				Code signing.
+				OCSP signing.
+				Time stamping.
+				Ipsec IKE.
+			Key Usage (critical):
+				Digital signature.
+				Key encipherment.
+				Certificate signing.
+				CRL signing.
+Other Information:
+	Public Key ID:
+		445dbb9420a581a6344e8ed16d553fcfbe5089bc
+
+Self signature: verified
+
+-----BEGIN NEW CERTIFICATE REQUEST-----
+MIIDljCCAn4CAQAwgZcxETAPBgNVBAMTCFBhZ2VQYXJlMREwDwYDVQQLEwhQYWdl
+Q2FyZTERMA8GA1UEChMIUGFnZUNhcmUxDzANBgNVBAcTBk1hZHJpZDEPMA0GA1UE
+CBMGTWFkcmlkMQswCQYDVQQGEwJFUzEYMBYGCgmSJomT8ixkARkWCFBhZ2VDYXJl
+MRMwEQYKCZImiZPyLGQBARMDMDAxMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIB
+CgKCAQEA2TnQa8xcHkzgDxCcCu3SxDVveoqt678Ml8toZcQNaDUEvIR/xxvNqLtM
+lsofjhlcPFSu5VURbXEEalupeG/JWcxHe6L/vHilkB7+t2FNlOV1m2saQ+0QL184
+VbTtgfJjRXlR71uG9sgD7dlsNRsDuosPphMVLmz7KYhhlbmCiHFoFbn27adRIzmI
+tep+Gy+9ZYRiDy0lEMibeupEZxASRll/veqkUHJ0euDROBQFd5xaWPiPcTC3sqEt
+MaGyzXpd+Y4EPHOXHqn/y/50eaFTKzKMzUmba+efuX3/2E3w0ssrx8cojUQ3uSlo
+AB3qrQkY9x57RJym+lAY1kc15jcJYwIDAQABoIG4MIG1BgkqhkiG9w0BCQ4xgacw
+gaQwSgYDVR0RBEMwQYIJcGFnZS5jYXJlgg1wYWdlY2FyZS5jb20ugghQYWdlQ2Fy
+ZYEbam9zZS5zYW5sZWFuZHJvQHdpdHdvcmtzLmVzMA8GA1UdEwEB/wQFMAMBAf8w
+NAYDVR0lAQH/BCowKAYIKwYBBQUHAwMGCCsGAQUFBwMJBggrBgEFBQcDCAYIKwYB
+BQUHAxEwDwYDVR0PAQH/BAUDAwemADANBgkqhkiG9w0BAQsFAAOCAQEAO2owvDrE
+ZsSl58P5ROY7F9y54r2XSnE3sZtHbx7n02yL6bYDQEVV6wBugj54c2Dyo6BW6/f5
+gworTx9GgqgwVX+syi7zq/FTrjdW6kHilJscXVVlEZuviH1zRFlzlF0rATvkgr5X
+/QO/VOUWyV8hizEpPOp0M6t0ErR7EBI9KVsoz73uPGwM9970tebTGbiO07AYupYf
+hFaM0e2NL5ESEPiisan9giOhgnVkQuHLfLd/OBKh205M0Dh1H06iv9D6zrHfRMjK
+vQJ3OOsprRInKh6pW+uc1ycNi6EATVSv33+n7VbmKvLhBIXoYbMXHt5ynmc0xfFR
+uXzvVIIjx9Swkw==
+-----END NEW CERTIFICATE REQUEST-----

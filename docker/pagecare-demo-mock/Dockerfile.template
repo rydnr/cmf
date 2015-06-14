@@ -1,0 +1,47 @@
+FROM ${NAMESPACE}/base:${TAG}
+MAINTAINER ${MAINTAINER}
+
+COPY Dockerfile /Dockerfile
+COPY rc.local /etc/rc.local
+COPY pagecare.template /etc/ssl/pagecare.template
+COPY pagecare-ca.template /etc/ssl/pagecare-ca.template
+COPY pagecare.key /etc/ssl/private/pagecare.key
+COPY pagecare.csr /etc/ssl/private/pagecare.csr
+COPY pagecare.crt /etc/ssl/certs/pagecare.crt
+
+RUN \
+  DEBIAN_FRONTEND=noninteractive \
+  sudo apt-add-repository ppa:brightbox/ruby-ng-experimental && \
+  sudo apt-get update && \
+  sudo apt-get install -y \
+      ruby2.2 ruby2.2-dev \
+      apache2 gnutls-bin libapache2-mod-gnutls \
+      make gettext && \
+  sudo update-alternatives --remove ruby /usr/bin/ruby2.2 && \
+  sudo update-alternatives --remove irb /usr/bin/irb2.2 && \
+  sudo update-alternatives --remove gem /usr/bin/gem2.2 && \
+  sudo update-alternatives \
+    --install /usr/bin/ruby ruby /usr/bin/ruby2.2 50 \
+    --slave /usr/bin/irb irb /usr/bin/irb2.2 \
+    --slave /usr/bin/rake rake /usr/bin/rake2.2 \
+    --slave /usr/bin/gem gem /usr/bin/gem2.2 \
+    --slave /usr/bin/rdoc rdoc /usr/bin/rdoc2.2 \
+    --slave /usr/bin/testrb testrb /usr/bin/testrb2.2 \
+    --slave /usr/bin/erb erb /usr/bin/erb2.2 \
+    --slave /usr/bin/ri ri /usr/bin/ri2.2 && \
+  update-alternatives --config ruby && \
+  a2dissite 000-default && \
+  chmod +x /etc/rc.local && \
+  gem install apiaryio && \
+  chmod 600 /etc/ssl/private/pagecare.* && \
+  chmod 755 /etc/ssl/certs/pagecare.crt && \
+  chown www-data /etc/ssl/private/pagecare.key
+
+VOLUME "/var/www"
+
+EXPOSE 80
+EXPOSE 443
+
+# Run with
+# cd [apache-module-workdir];
+# sudo docker run -d -p 80:80 -p 443:443 ${NAMESPACE}/apache
