@@ -105,6 +105,6 @@ function checkInput() {
 
 function main() {
     sudo sh -c "(echo 127.0.0.1 localhost ${DOMAIN}; grep -v '127.0.0.1' /etc/hosts) > /tmp/hosts && mv /tmp/hosts /etc/hosts"
-    sudo docker run -d -p 80:80 -p 443:443 -e APIARY_API_KEY="${APIARYIO_API_TOKEN}" \
+    sudo docker run -p 80:80 -p 443:443 -e APIARY_API_KEY="${APIARYIO_API_TOKEN}" \
         -e VIRTUAL_HOST=${DOMAIN} -e URLS="${URLS}" acmsl/pagecare-demo-mock
 }

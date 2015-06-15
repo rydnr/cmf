@@ -1,81 +1,143 @@
-#!/bin/bash
+#!/bin/bash dry-wit
+# Copyright 2015-today Automated Computing Machinery S.L.
+# Distributed under the terms of the GNU General Public License v3
 
-_host=${VIRTUAL_HOST%:*}
-_host=${_host:-$(hostname)}
-_noWwwHost=${_host#www.*}
-_port=${VIRTUAL_HOST#*:}
-if [ "${_port}" == "${VIRTUAL_HOST}" ]; then
-  _port=80
-fi
+function usage() {
+cat <<EOF
+$SCRIPT_NAME [-v[v]] [-q|--quiet]
+$SCRIPT_NAME [-h|--help]
+(c) 2015-today Automated Computing Machinery S.L.
+    Distributed under the terms of the GNU General Public License v3
 
-cat <<EOF > /etc/apache2/sites-available/${_host}.conf
+Boots up a pagecare-demo-mock Docker image:
+- Sets up the Apache configuration.
+- Publishes the third-party content to apiary mock server.
+- Creates and signs the SSL certificate.
+EOF
+}
+
+# Requirements
+function checkRequirements() {
+  checkReq a2enmod A2ENMOD_NOT_INSTALLED;
+  checkReq certtool CERTTOOL_NOT_INSTALLED;
+  checkReq envsubst ENVSUBST_NOT_INSTALLED;
+}
+ 
+# Error messages
+function defineErrors() {
+  export INVALID_OPTION="Unrecognized option";
+  export A2ENMOD_NOT_INSTALLED="a2enmod is not installed";
+  export CERTTOOL_NOT_INSTALLED="certtool is not installed";
+  export ENVSUBST_NOT_INSTALLED="envsubst is not installed";
+
+  ERROR_MESSAGES=(\
+    INVALID_OPTION \
+    A2ENMOD_NOT_INSTALLED \
+    CERTTOOL_NOT_INSTALLED \
+    ENVSUBST_NOT_INSTALLED \
+  );
+
+  export ERROR_MESSAGES;
+}
+ 
+# Checking input
+function checkInput() {
+
+  local _flags=$(extractFlags $@);
+  local _flagCount;
+  local _currentCount;
+  logDebug -n "Checking input";
+
+  # Flags
+  for _flag in ${_flags}; do
+    _flagCount=$((_flagCount+1));
+    case ${_flag} in
+      -h | --help | -v | -vv | -q)
+         shift;
+         ;;
+      *) exitWithErrorCode INVALID_OPTION ${_flag};
+         ;;
+    esac
+  done
+ 
+  logDebugResult SUCCESS "valid";
+}
+
+[ -e "$(dirname ${SCRIPT_NAME})/$(basename ${SCRIPT_NAME} .sh).inc.sh" ] && source "$(dirname ${SCRIPT_NAME})/$(basename ${SCRIPT_NAME} .sh).inc.sh"
+
+function configureApache() {
+  local _host="${1}";
+  local _port=$2;
+  _noWwwHost=${_host#www.*}
+
+  logInfo -n "Configuring ${_host} virtual host for Apache"
+  
+  cat <<EOF > /etc/apache2/sites-available/${_host}.conf
 <VirtualHost *:80>
     ServerName ${_host}
 EOF
-if [ "${_noWwwHost}" != "${_host}" ]; then
+  if [ "${_noWwwHost}" != "${_host}" ]; then
     cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
     ServerAlias ${_noWwwHost}
 EOF
-fi
+  fi
 
-cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
-    RewriteEngine On
-EOF
-
-for _url in ${URLS}; do
+  for _url in ${URLS}; do
     if [ "${_url}" == "/" ]; then
-        cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
-    RewriteRule ^/?$ ${APIARYIO_PRIVATE_URL}/${_host}/ [L,P]
+      cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    ProxyPassMatch ^(/?)$ ${APIARYIO_PRIVATE_URL}/${_host}
 EOF
     else
-        cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
-    RewriteRule ^${_url}$ ${APIARYIO_PRIVATE_URL}/${_host}${_url} [L,P]
+      cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    ProxyPassMatch ^${_url}$ ${APIARYIO_PRIVATE_URL}/${_host}${_url}
 EOF
     fi
-done
+  done
 
-cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
-    RewriteRule ^(.*)$ http://${_host}\$1 [L,P]
+  cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    ProxyPassMatch ^(/.+)$ https://${_host}\$1
+    ProxyPassReverse / https://${_host}/
 </VirtualHost>
 
 <VirtualHost *:443>
     ServerName ${_host}
 EOF
 
-if [ "${_noWwwHost}" != "${_host}" ]; then
+  if [ "${_noWwwHost}" != "${_host}" ]; then
     cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
     ServerAlias ${_noWwwHost}
 EOF
-fi
+  fi
 
-cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
-    GnuTLSEnable on
-    GnuTLSPriorities NORMAL:!DHE-RSA:!DHE-DSS:!AES-256-CBC:%COMPAT
+  cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    SSLEngine on
+    SSLCertificateFile      /etc/ssl/certs/${_host}.crt
+    SSLCertificateKeyFile /etc/ssl/private/${_host}.key
 
-    GnuTLSCertificateFile /etc/ssl/certs/${_host}.crt
-    GnuTLSKeyFile /etc/ssl/private/${_host}.key
+    SSLProxyEngine On
+    RequestHeader set Front-End-Https "On"
 
-    RewriteEngine On
 EOF
 
-for _url in ${URLS}; do
+  for _url in ${URLS}; do
     if [ "${_url}" == "/" ]; then
-        cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
-    RewriteRule ^/?$ https://${APIARYIO_PRIVATE_URL#http://}/${_host}/ [L,P]
+      cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    ProxyPassMatch ^(/?)$ ${APIARYIO_PRIVATE_URL}/${_host}
 EOF
     else
-        cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
-    RewriteRule ^${_url}$ https://${APIARYIO_PRIVATE_URL#http://}/${_host}${_url} [L,P]
+      cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    ProxyPassMatch ^${_url}$ ${APIARYIO_PRIVATE_URL}/${_host}${_url}
 EOF
     fi
-done
+  done
 
-cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
-    RewriteRule ^(.*)$ https://${_host}\$1 [L,P]
+  cat <<EOF >> /etc/apache2/sites-available/${_host}.conf
+    ProxyPassMatch ^(/.+)$ https://${_host}\$1
+    ProxyPassReverse / https://${_host}/
 </VirtualHost>
 EOF
 
-cat <<EOF > /etc/apache2/ports.conf
+  cat <<EOF > /etc/apache2/ports.conf
 Listen ${_port}
 
 <IfModule ssl_module>
@@ -89,7 +151,15 @@ Listen ${_port}
 # vim: syntax=apache ts=4 sw=4 sts=4 sr noet
 EOF
 
-cat <<EOF > /tmp/${APIARYIO_API_NAME}.apib
+  logInfoResult SUCCESS "done"
+
+  a2ensite ${_host} 2> /dev/null
+}
+
+function refreshMock() {
+  local _host="${1}";
+
+  cat <<EOF > /tmp/${APIARYIO_API_NAME}.apib
 FORMAT: 1A
 
 # PageCare
@@ -101,7 +171,7 @@ PageCare provides a simple API to serve third-party websites.
 Third-party web content.
 
 EOF
-for _url in ${URLS}; do
+  for _url in ${URLS}; do
     cat <<EOF >> /tmp/${APIARYIO_API_NAME}.apib
 ## Retrieve URL [/${_host}${_url}]
 
@@ -109,36 +179,61 @@ for _url in ${URLS}; do
 
 + Response 200 (text/html)
 
-$(curl -L -s http://${VIRTUAL_HOST}${_url} | sed 's/\xe1/a/g' | sed 's/\xf1/n/g' | sed 's/\xa1/ /g' | sed 's/\xed/i/g' | sed 's/^/        /g')
 EOF
-done
+    logInfo -n "Caching ${_host}${_url}"
+    
+    curl -L -s http://${VIRTUAL_HOST}${_url} | sed 's/\xe1/a/g' | sed 's/\xf1/n/g' | sed 's/\xa1/ /g' | sed 's/\xed/i/g' | sed 's/\xc3\xb3/o/g' | sed 's/\xc3\xad/i/g' | sed 's/\xc3\xba/u/g' | sed 's/\xb1/n/g' | sed 's/\x89/e/g' | sed 's/\xc2\xbf/ /g' | sed 's/\xe2\x82\xac/ /g' | sed 's/\x9a/U/g' | sed 's/\xa9/e/g' | sed 's/\xe2\x80\x9c/"/g' | sed 's/\xe2\x80\x9d/"/g' | sed 's/^/        /g' >> /tmp/${APIARYIO_API_NAME}.apib
 
-apiary publish --api-name=${APIARYIO_API_NAME} --path=/tmp/${APIARYIO_API_NAME}.apib --message="Testing PageCare API with ${_host} mock"
+    logInfoResult SUCCESS "done"
+  done
 
-cd /etc/ssl
-envsubst < /etc/ssl/pagecare.template > /etc/ssl/${_host}.template
+  logInfo -n "Refresing apiary.io mock server"
 
-certtool --generate-privkey --outfile /etc/ssl/private/${_host}.key
-certtool --generate-request \
-         --load-privkey /etc/ssl/private/${_host}.key \
-         --template /etc/ssl/${_host}.template \
-         --outfile /etc/ssl/private/${_host}.csr
+  apiary publish --api-name=${APIARYIO_API_NAME} --path=/tmp/${APIARYIO_API_NAME}.apib --message="Testing PageCare API with ${_host} mock"
 
-certtool --generate-certificate --load-request /etc/ssl/private/${_host}.csr \
-         --load-ca-certificate /etc/ssl/certs/pagecare.crt \
-         --load-ca-privkey /etc/ssl/private/pagecare.key \
-         --template /etc/ssl/${_host}.template \
-         --outfile /etc/ssl/certs/${_host}.crt
+  logInfoResult SUCCESS "done"
+}
 
-chmod 755 /etc/ssl/certs/${_host}.crt
+function setupCertificate() {
+  local _host="${1}";
 
-a2ensite ${_host}
-a2dismod ssl
-a2enmod proxy
-a2enmod proxy_http
-a2enmod rewrite
-a2enmod gnutls
+  logInfo -n "Setting up SSL certificate"
 
-service apache2 start &
+  cd /etc/ssl
+  envsubst < /etc/ssl/pagecare.template > /etc/ssl/${_host}.template
 
-exit 0
+  certtool --generate-privkey --outfile /etc/ssl/private/${_host}.key
+  certtool --generate-request \
+           --load-privkey /etc/ssl/private/${_host}.key \
+           --template /etc/ssl/${_host}.template \
+           --outfile /etc/ssl/private/${_host}.csr
+
+  certtool --generate-certificate --load-request /etc/ssl/private/${_host}.csr \
+           --load-ca-certificate /etc/ssl/certs/pagecare.crt \
+           --load-ca-privkey /etc/ssl/private/pagecare.key \
+           --template /etc/ssl/${_host}.template \
+           --outfile /etc/ssl/certs/${_host}.crt
+
+  chmod 755 /etc/ssl/certs/${_host}.crt
+
+  logInfoResult SUCCESS "done"
+}
+
+function main() {
+
+  _host=${VIRTUAL_HOST%:*}
+  _host=${_host:-$(hostname)}
+  _port=${VIRTUAL_HOST#*:}
+  if [ "${_port}" == "${VIRTUAL_HOST}" ]; then
+    _port=80
+  fi
+
+  configureApache "${_host}" ${_port};
+
+  refreshMock "${_host}";
+  
+  setupCertificate "${_host}";
+  
+  service apache2 start &
+}
+
